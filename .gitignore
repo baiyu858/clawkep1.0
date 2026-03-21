@@ -1,0 +1,156 @@
+# ClawKep top-level gitignore
+#
+# Important:
+# This repository currently contains embedded upstream repos:
+#   openclaw/.git
+#   ReKep/.git
+#   OmniGibson-legacy/.git
+#
+# If you want to commit clawkep/ as one single repo, remove those nested
+# .git directories before the first top-level git add / git commit.
+
+# -----------------------------------------------------------------------------
+# Secrets and local auth
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.secret
+
+# Local ACP / runtime config
+.acpxrc.json
+.acpxrc.json*
+.acpxrc*.json*
+
+# -----------------------------------------------------------------------------
+# OS / editor junk
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# -----------------------------------------------------------------------------
+# Python caches and local envs
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.nox/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# -----------------------------------------------------------------------------
+# Node / frontend dependencies
+# -----------------------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.parcel-cache/
+coverage/
+dist/
+build/
+
+# -----------------------------------------------------------------------------
+# Repository-local runtime state
+# -----------------------------------------------------------------------------
+.downloads/
+.tools/
+openclaw-runtime/state/
+openclaw/.agent/
+openclaw/.agents/
+# -----------------------------------------------------------------------------
+# ReKep generated artifacts
+# -----------------------------------------------------------------------------
+ReKep/videos/
+ReKep/logs/
+
+# -----------------------------------------------------------------------------
+# OmniGibson / Isaac local datasets and keys
+# -----------------------------------------------------------------------------
+OmniGibson-legacy/omnigibson/data/
+
+# -----------------------------------------------------------------------------
+# Large archives and binary artifacts
+# -----------------------------------------------------------------------------
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.bz2
+*.xz
+
+# -----------------------------------------------------------------------------
+# Videos / recordings / generated media
+# -----------------------------------------------------------------------------
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# -----------------------------------------------------------------------------
+# Common ML / simulation artifacts
+# -----------------------------------------------------------------------------
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+*.engine
+*.safetensors
+*.npy
+*.npz
+*.pkl
+*.joblib
+
+# -----------------------------------------------------------------------------
+# Temporary logs and dumps
+# -----------------------------------------------------------------------------
+*.log
+*.out
+*.err
+*.tmp
+*.temp
+core
+core.*
+
+ReKep/vlm_query/
+.ignore/
+# OmniGibson-legacy/*
+openclaw-runtime/README.md
+.out/*
+ReKep/scene_qa/
+run.sh
+ui.sh
+openclaw-runtime/workspace/tmp/*
+ReKep/robot/dobot/robot_kinematics/X-Trainer-URDF/*
+
+# Sanitized release: avoid committing local regenerated state/calibration
+openclaw-runtime/workspace/.openclaw/workspace-state.json
+openclaw/docs/.i18n/*.jsonl
+SANITIZED_RELEASE_NOTES.md

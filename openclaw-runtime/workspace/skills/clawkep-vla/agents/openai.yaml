@@ -1,0 +1,4 @@
+interface:
+  display_name: "ClawKep VLA"
+  short_description: "Natural-language Dobot control + scene QA"
+  default_prompt: "Use $clawkep-vla for natural-language Dobot XTrainer control and scene QA. Keep rekep_sim internal and never ask the user for action enums."

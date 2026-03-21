@@ -1,0 +1,9 @@
+{
+  "intrinsics": [
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0]
+  ],
+  "depth_scales": [0.001, 0.001, 0.001],
+  "note": "Sanitized template. Regenerate this file on your hardware before running real robot tasks."
+}

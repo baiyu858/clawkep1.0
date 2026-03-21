@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+find_isaac_root() {
+  local candidate
+  if [[ -n "${ISAAC_SIM_ROOT:-}" ]]; then
+    candidate="${ISAAC_SIM_ROOT}"
+    if [[ -f "${candidate}/setup_conda_env.sh" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  fi
+
+  for candidate in \
+    "${HOME}/APP/isaac-smi" \
+    "${HOME}/.local/share/ov/pkg/isaac-sim" \
+    "${HOME}/.local/share/ov/pkg/isaac-sim-2023.1.1" \
+    "${HOME}/.local/share/ov/pkg/isaac-sim-4.5.0" \
+    "${HOME}/.local/share/ov/pkg/isaac-sim-5.1.0"
+  do
+    if [[ -f "${candidate}/setup_conda_env.sh" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ISAAC_ROOT="$(find_isaac_root)"; then
+  export ISAAC_SIM_ROOT="${ISAAC_ROOT}"
+  export OLDPWD="${OLDPWD:-$PWD}"
+  export ZSH_VERSION="${ZSH_VERSION:-}"
+  # shellcheck disable=SC1090
+  set +u
+  source "${ISAAC_SIM_ROOT}/setup_conda_env.sh"
+  set -u
+else
+  printf 'warning: Isaac Sim root not found; gateway will start without Isaac environment exports\n' >&2
+fi
+
+exec "$ROOT_DIR/openclaw-runtime/bin/openclaw-local" gateway run --bind loopback --port 18789 --force "$@"

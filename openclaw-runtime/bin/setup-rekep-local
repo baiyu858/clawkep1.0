@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REKEP_DIR="$ROOT_DIR/ReKep"
+CONDA_BIN="${CONDA_EXE:-$(command -v conda || true)}"
+
+if [[ -z "$CONDA_BIN" ]]; then
+  printf 'error: conda command not found. Set CONDA_EXE or add conda to PATH.\n' >&2
+  exit 2
+fi
+
+"$CONDA_BIN" run -n rekep pip install -r "$REKEP_DIR/requirements.rekep-extra.txt"
+
+cat <<'EOF'
+setup-rekep-local completed for the non-Open3D dependencies.
+
+Optional:
+  conda run -n rekep pip install -r "$REKEP_DIR/requirements.rekep-optional.txt"
+
+Note:
+  On this host, Open3D is still a blocker because the current Ubuntu 24.04 + isaacsim stack does not cleanly match the upstream ReKep target environment.
+EOF

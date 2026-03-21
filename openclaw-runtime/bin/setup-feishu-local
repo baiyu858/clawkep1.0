@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RUNTIME_DIR="$ROOT_DIR/openclaw-runtime"
+CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$RUNTIME_DIR/state/openclaw.json}"
+
+prompt_if_empty() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local secret="${3:-false}"
+  local current_value="${!var_name:-}"
+
+  if [[ -n "$current_value" ]]; then
+    return 0
+  fi
+
+  if [[ ! -t 0 ]]; then
+    printf '%s is required. Export it first or run this script interactively.\n' "$var_name" >&2
+    exit 1
+  fi
+
+  if [[ "$secret" == "true" ]]; then
+    read -r -s -p "$prompt_text" current_value
+    printf '\n'
+  else
+    read -r -p "$prompt_text" current_value
+  fi
+
+  if [[ -z "$current_value" ]]; then
+    printf '%s cannot be empty.\n' "$var_name" >&2
+    exit 1
+  fi
+
+  printf -v "$var_name" '%s' "$current_value"
+}
+
+prompt_if_empty FEISHU_APP_ID "Feishu App ID: "
+prompt_if_empty FEISHU_APP_SECRET "Feishu App Secret: " true
+
+FEISHU_CONNECTION_MODE="${FEISHU_CONNECTION_MODE:-websocket}"
+FEISHU_DOMAIN="${FEISHU_DOMAIN:-feishu}"
+FEISHU_DM_POLICY="${FEISHU_DM_POLICY:-pairing}"
+
+if [[ "$FEISHU_CONNECTION_MODE" == "webhook" ]]; then
+  prompt_if_empty FEISHU_VERIFICATION_TOKEN "Feishu Verification Token: "
+fi
+
+mkdir -p "$(dirname "$CONFIG_PATH")"
+
+export \
+  FEISHU_APP_ID \
+  FEISHU_APP_SECRET \
+  FEISHU_CONNECTION_MODE \
+  FEISHU_DOMAIN \
+  FEISHU_DM_POLICY \
+  FEISHU_ALLOW_FROM="${FEISHU_ALLOW_FROM:-}" \
+  FEISHU_GROUP_POLICY="${FEISHU_GROUP_POLICY:-}" \
+  FEISHU_GROUP_ALLOW_FROM="${FEISHU_GROUP_ALLOW_FROM:-}" \
+  FEISHU_REQUIRE_MENTION="${FEISHU_REQUIRE_MENTION:-true}" \
+  FEISHU_REPLY_IN_THREAD="${FEISHU_REPLY_IN_THREAD:-enabled}" \
+  FEISHU_TOPIC_SESSION_MODE="${FEISHU_TOPIC_SESSION_MODE:-enabled}" \
+  FEISHU_RENDER_MODE="${FEISHU_RENDER_MODE:-auto}" \
+  FEISHU_VERIFICATION_TOKEN="${FEISHU_VERIFICATION_TOKEN:-}" \
+  FEISHU_WEBHOOK_PATH="${FEISHU_WEBHOOK_PATH:-}" \
+  FEISHU_WEBHOOK_HOST="${FEISHU_WEBHOOK_HOST:-}" \
+  FEISHU_WEBHOOK_PORT="${FEISHU_WEBHOOK_PORT:-}"
+
+python3 - "$CONFIG_PATH" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+
+def parse_csv(name: str) -> list[str]:
+    raw = os.environ.get(name, "")
+    return [part.strip() for part in raw.replace(";", ",").split(",") if part.strip()]
+
+
+def parse_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise SystemExit(f"{name} must be true/false, got: {raw}")
+
+
+def parse_choice(name: str, allowed: set[str], default: str) -> str:
+    raw = os.environ.get(name, "").strip()
+    value = raw or default
+    if value not in allowed:
+        choices = ", ".join(sorted(allowed))
+        raise SystemExit(f"{name} must be one of: {choices}. got: {value}")
+    return value
+
+
+config_path = pathlib.Path(sys.argv[1])
+if config_path.exists():
+    with config_path.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+else:
+    config = {}
+
+plugins = config.setdefault("plugins", {})
+allow = plugins.setdefault("allow", [])
+if not isinstance(allow, list):
+    raise SystemExit("plugins.allow must be a JSON array")
+if "feishu" not in allow:
+    allow.append("feishu")
+
+entries = plugins.setdefault("entries", {})
+if not isinstance(entries, dict):
+    raise SystemExit("plugins.entries must be a JSON object")
+feishu_entry = entries.setdefault("feishu", {})
+if not isinstance(feishu_entry, dict):
+    feishu_entry = {}
+    entries["feishu"] = feishu_entry
+feishu_entry["enabled"] = True
+
+channels = config.setdefault("channels", {})
+if not isinstance(channels, dict):
+    raise SystemExit("channels must be a JSON object")
+feishu = channels.setdefault("feishu", {})
+if not isinstance(feishu, dict):
+    feishu = {}
+    channels["feishu"] = feishu
+
+connection_mode = parse_choice(
+    "FEISHU_CONNECTION_MODE",
+    {"websocket", "webhook"},
+    str(feishu.get("connectionMode", "websocket") or "websocket"),
+)
+dm_policy = parse_choice(
+    "FEISHU_DM_POLICY",
+    {"open", "pairing", "allowlist"},
+    str(feishu.get("dmPolicy", "pairing") or "pairing"),
+)
+domain = os.environ.get("FEISHU_DOMAIN", "").strip() or str(feishu.get("domain", "feishu") or "feishu")
+reply_in_thread = parse_choice(
+    "FEISHU_REPLY_IN_THREAD",
+    {"disabled", "enabled"},
+    str(feishu.get("replyInThread", "enabled") or "enabled"),
+)
+topic_session_mode = parse_choice(
+    "FEISHU_TOPIC_SESSION_MODE",
+    {"disabled", "enabled"},
+    str(feishu.get("topicSessionMode", "enabled") or "enabled"),
+)
+render_mode = parse_choice(
+    "FEISHU_RENDER_MODE",
+    {"auto", "raw", "card"},
+    str(feishu.get("renderMode", "auto") or "auto"),
+)
+
+allow_from = parse_csv("FEISHU_ALLOW_FROM")
+group_allow_from = parse_csv("FEISHU_GROUP_ALLOW_FROM")
+group_policy_env = os.environ.get("FEISHU_GROUP_POLICY", "").strip()
+
+feishu["enabled"] = True
+feishu["appId"] = os.environ["FEISHU_APP_ID"].strip()
+feishu["appSecret"] = os.environ["FEISHU_APP_SECRET"].strip()
+feishu["connectionMode"] = connection_mode
+feishu["domain"] = domain
+feishu["dmPolicy"] = dm_policy
+feishu["requireMention"] = parse_bool("FEISHU_REQUIRE_MENTION", feishu.get("requireMention", True) is not False)
+feishu["replyInThread"] = reply_in_thread
+feishu["topicSessionMode"] = topic_session_mode
+feishu["renderMode"] = render_mode
+
+if allow_from:
+    feishu["allowFrom"] = allow_from
+
+if group_policy_env:
+    feishu["groupPolicy"] = parse_choice(
+        "FEISHU_GROUP_POLICY",
+        {"open", "allowlist", "disabled"},
+        "allowlist",
+    )
+elif group_allow_from and "groupPolicy" not in feishu:
+    feishu["groupPolicy"] = "allowlist"
+
+if group_allow_from:
+    feishu["groupAllowFrom"] = group_allow_from
+
+if connection_mode == "webhook":
+    verification_token = os.environ.get("FEISHU_VERIFICATION_TOKEN", "").strip()
+    if not verification_token:
+        raise SystemExit("FEISHU_VERIFICATION_TOKEN is required when FEISHU_CONNECTION_MODE=webhook")
+    feishu["verificationToken"] = verification_token
+    webhook_path = os.environ.get("FEISHU_WEBHOOK_PATH", "").strip()
+    webhook_host = os.environ.get("FEISHU_WEBHOOK_HOST", "").strip()
+    webhook_port = os.environ.get("FEISHU_WEBHOOK_PORT", "").strip()
+    if webhook_path:
+        feishu["webhookPath"] = webhook_path
+    if webhook_host:
+        feishu["webhookHost"] = webhook_host
+    if webhook_port:
+        feishu["webhookPort"] = int(webhook_port)
+
+with config_path.open("w", encoding="utf-8") as handle:
+    json.dump(config, handle, indent=2, ensure_ascii=True)
+    handle.write("\n")
+
+print(f"updated config: {config_path}")
+print("feishu plugin enabled for this local runtime")
+print(f"connection mode: {connection_mode}")
+print(f"domain: {domain}")
+print("next steps:")
+print("  1. restart the gateway: ./openclaw-runtime/bin/openclaw-gateway-local")
+print("  2. verify the channel: ./openclaw-runtime/bin/openclaw-local channels status --probe")
+print("  3. in Feishu Open Platform, enable the bot and subscribe to im.message.receive_v1")
+PY

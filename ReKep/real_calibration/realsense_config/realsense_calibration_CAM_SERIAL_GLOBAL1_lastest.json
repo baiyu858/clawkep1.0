@@ -1,0 +1,58 @@
+{
+  "device_info": {
+    "serial_number": "CAM_SERIAL_GLOBAL1",
+    "name": "Intel RealSense D455",
+    "firmware_version": "REPLACE_ME",
+    "product_line": "D400",
+    "device_id": "CAM_SERIAL_GLOBAL1"
+  },
+  "timestamp": "REPLACE_WITH_CALIB_TIMESTAMP",
+  "color_intrinsics": {
+    "width": 640,
+    "height": 480,
+    "ppx": 0.0,
+    "ppy": 0.0,
+    "fx": 0.0,
+    "fy": 0.0,
+    "model": "distortion.inverse_brown_conrady",
+    "coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+    "distortion_model": "distortion.inverse_brown_conrady"
+  },
+  "depth_intrinsics": {
+    "width": 640,
+    "height": 480,
+    "ppx": 0.0,
+    "ppy": 0.0,
+    "fx": 0.0,
+    "fy": 0.0,
+    "model": "distortion.brown_conrady",
+    "coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+    "distortion_model": "distortion.brown_conrady"
+  },
+  "depth_scale": 0.001,
+  "extrinsics": {
+    "rotation": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    "translation": [0.0, 0.0, 0.0],
+    "transform_matrix": [
+      [1.0, 0.0, 0.0, 0.0],
+      [0.0, 1.0, 0.0, 0.0],
+      [0.0, 0.0, 1.0, 0.0],
+      [0.0, 0.0, 0.0, 1.0]
+    ]
+  },
+  "stream_config": {
+    "color": {
+      "width": 640,
+      "height": 480,
+      "format": "bgr8",
+      "fps": 30
+    },
+    "depth": {
+      "width": 640,
+      "height": 480,
+      "format": "z16",
+      "fps": 30
+    }
+  },
+  "note": "Sanitized template. Replace with your own calibration output before real execution."
+}

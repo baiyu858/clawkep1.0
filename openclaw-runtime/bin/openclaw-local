@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RUNTIME_DIR="$ROOT_DIR/openclaw-runtime"
+CONDA_BIN="${CONDA_EXE:-$(command -v conda || true)}"
+
+export OPENCLAW_STATE_DIR="$RUNTIME_DIR/state"
+export OPENCLAW_CONFIG_PATH="$OPENCLAW_STATE_DIR/openclaw.json"
+
+mkdir -p "$OPENCLAW_STATE_DIR" "$RUNTIME_DIR/workspace"
+
+deny_acp_or_codex_path() {
+  if [[ "${1:-}" == "acp" ]]; then
+    printf 'error: ACP is disabled in this runtime. Use the main OpenClaw streaming path (DMXAPI) instead.\n' >&2
+    exit 2
+  fi
+
+  local -a argv
+  local i arg next argc
+  argv=("$@")
+  argc="${#argv[@]}"
+  for ((i=0; i<argc; i++)); do
+    arg="${argv[i]}"
+    next=""
+    if (( i + 1 < argc )); then
+      next="${argv[i+1]}"
+    fi
+    if [[ "$arg" == "--agent" || "$arg" == "--session-id" ]]; then
+      if [[ "$next" == "codex" ]]; then
+        printf 'error: agent/session "codex" is blocked. Use "--agent main" and DMXAPI models.\n' >&2
+        exit 2
+      fi
+    fi
+  done
+}
+
+load_dmxapi_api_key() {
+  python3 - "$OPENCLAW_CONFIG_PATH" <<'PY'
+import json
+import sys
+
+config_path = sys.argv[1]
+try:
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = json.load(handle)
+except Exception:
+    raise SystemExit(1)
+
+value = (
+    config.get("models", {})
+    .get("providers", {})
+    .get("dmxapi", {})
+    .get("apiKey", "")
+)
+
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+PY
+}
+
+if [[ -z "${DMXAPI_API_KEY:-}" && -f "$OPENCLAW_CONFIG_PATH" ]] && command -v python3 >/dev/null 2>&1; then
+  if DMXAPI_API_KEY_FROM_CONFIG="$(load_dmxapi_api_key 2>/dev/null)" && [[ -n "$DMXAPI_API_KEY_FROM_CONFIG" ]]; then
+    export DMXAPI_API_KEY="$DMXAPI_API_KEY_FROM_CONFIG"
+  fi
+fi
+
+INHERITED_PYTHONPATH="${PYTHONPATH:-}"
+
+deny_acp_or_codex_path "$@"
+
+if [[ -z "$CONDA_BIN" ]]; then
+  printf 'error: conda command not found. Set CONDA_EXE or add conda to PATH.\n' >&2
+  exit 2
+fi
+
+if [[ -n "$INHERITED_PYTHONPATH" ]]; then
+  exec env -u PYTHONPATH "$CONDA_BIN" run -n openclaw env PYTHONPATH="$INHERITED_PYTHONPATH" openclaw "$@"
+fi
+
+exec "$CONDA_BIN" run -n openclaw openclaw "$@"

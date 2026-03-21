@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONDA_BIN="${CONDA_EXE:-$(command -v conda || true)}"
+if [[ -z "$CONDA_BIN" ]]; then
+  printf 'error: conda command not found. Set CONDA_EXE or add conda to PATH.\n' >&2
+  exit 2
+fi
+
+"$CONDA_BIN" run -n openclaw npm install -g openclaw@latest --omit=optional

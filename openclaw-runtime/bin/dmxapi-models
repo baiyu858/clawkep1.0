@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${DMXAPI_BASE_URL:-https://www.dmxapi.cn/v1}"
+
+if [[ -z "${DMXAPI_API_KEY:-}" ]]; then
+  echo "Set DMXAPI_API_KEY first." >&2
+  exit 1
+fi
+
+headers=(
+  -H "Accept: application/json"
+  -H "Authorization: ${DMXAPI_API_KEY}"
+)
+
+if [[ -n "${DMXAPI_USER_ID:-}" ]]; then
+  headers+=(-H "Rix-Api-User: ${DMXAPI_USER_ID}")
+fi
+
+response="$(curl -fsS "${headers[@]}" "${BASE_URL%/}/models")"
+
+if command -v jq >/dev/null 2>&1; then
+  printf '%s\n' "$response" | jq .
+else
+  printf '%s\n' "$response"
+fi
