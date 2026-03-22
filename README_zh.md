@@ -16,7 +16,7 @@
 
 ---
 
-## ClawKep 是什么
+## 🤖 ClawKep 是什么
 
 `ClawKep` 是一个**完整的、可运行的视觉语言动作智能体**：
 
@@ -30,7 +30,7 @@
 
 ---
 
-## 你可以直接用它做什么
+## 🧰 你可以直接用它做什么
 
 ### 面向操作者
 
@@ -46,7 +46,7 @@
 
 ---
 
-## 一张图看懂 ClawKep
+## 👀 一张图看懂 ClawKep
 
 ```mermaid
 flowchart LR
@@ -63,7 +63,7 @@ flowchart LR
 
 ---
 
-## 框架设计（ClawKep 分层）
+## 🏗️ 框架设计（ClawKep 分层）
 
 ```mermaid
 flowchart TB
@@ -135,7 +135,7 @@ flowchart TB
 
 ---
 
-## 统一接口：一套协议适配多种机械臂
+## 🔌 统一接口：一套协议适配多种机械臂
 
 ClawKep **先定义统一接口，再接入具体机械臂**。
 
@@ -167,7 +167,7 @@ ClawKep **先定义统一接口，再接入具体机械臂**。
 
 ---
 
-## 交互 -> 执行 -> 失败恢复：任务全流程
+## 🔄 交互 -> 执行 -> 失败恢复：任务全流程
 
 ```mermaid
 flowchart TD
@@ -194,7 +194,7 @@ flowchart TD
 
 ---
 
-## 快速上手（最短路径）
+## 🚀 快速上手（最短路径）
 
 > 以下命令默认在项目根目录执行。
 
@@ -297,7 +297,7 @@ conda run -n rekep python ReKep/dobot_bridge.py job_status \
 ```
 
 ---
-## 真实任务体验（推荐流程）
+## 🧭 真实任务体验（推荐流程）
 
 1. **预检**：先确认机器人、相机、模型、连接状态。
 2. **观察**：启动待机流，先问“当前画面有什么”。
@@ -308,7 +308,7 @@ conda run -n rekep python ReKep/dobot_bridge.py job_status \
 
 ---
 
-## 如何快速适配你的新机器人
+## ⚙️ 如何快速适配你的新机器人
 
 目标：让你在最短时间把自己的机械臂接到 ClawKep，并跑通 “预检 -> 感知 -> 执行 -> 恢复” 闭环。
 
@@ -379,7 +379,7 @@ conda run -n rekep python ReKep/dobot_bridge.py execute \
 
 ---
 
-## 路线图（Roadmap）
+## 🗺️ 路线图（Roadmap）
 
 - [x] Dobot机械臂支持
 - [x] 抓取/放置操作
@@ -394,7 +394,7 @@ conda run -n rekep python ReKep/dobot_bridge.py execute \
 
 ---
 
-## 典型场景
+## 📌 典型场景
 
 ### 1) 桌面整理（长程）
 

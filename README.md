@@ -16,7 +16,7 @@
 
 ---
 
-## What Is ClawKep
+## 🤖 What Is ClawKep
 
 `ClawKep` is a **complete and runnable vision-language-action agent system**:
 
@@ -30,7 +30,7 @@ One-line definition:
 
 ---
 
-## What You Can Do With It
+## 🧰 What You Can Do With It
 
 ### For operators
 
@@ -46,7 +46,7 @@ One-line definition:
 
 ---
 
-## ClawKep at a Glance
+## 👀 ClawKep at a Glance
 
 ```mermaid
 flowchart LR
@@ -63,7 +63,7 @@ flowchart LR
 
 ---
 
-## System Design: Layered ClawKep Architecture
+## 🏗️ System Design: Layered ClawKep Architecture
 
 ```mermaid
 flowchart TB
@@ -135,7 +135,7 @@ Layer summary:
 
 ---
 
-## Unified Interface: One Protocol for Multiple Robot Arms
+## 🔌 Unified Interface: One Protocol for Multiple Robot Arms
 
 ClawKep **defines a unified interface first, then plugs in specific robot backends**.
 
@@ -167,7 +167,7 @@ Current status and intended expansion:
 
 ---
 
-## Full Task Flow: Interaction -> Execution -> Recovery
+## 🔄 Full Task Flow: Interaction -> Execution -> Recovery
 
 ```mermaid
 flowchart TD
@@ -194,7 +194,7 @@ Core value of this flow:
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 > The commands below assume you are at the project root.
 
@@ -304,7 +304,7 @@ conda run -n rekep python ReKep/dobot_bridge.py job_status \
 
 ---
 
-## Recommended Real-World Usage Flow
+## 🧭 Recommended Real-World Usage Flow
 
 1. **Preflight**: confirm robot, camera, model, and connectivity status.
 2. **Observe**: start the standby stream and ask what the current scene contains.
@@ -315,7 +315,7 @@ conda run -n rekep python ReKep/dobot_bridge.py job_status \
 
 ---
 
-## How to Adapt a New Robot Quickly
+## ⚙️ How to Adapt a New Robot Quickly
 
 Goal: get your own robot connected to ClawKep as quickly as possible and make the loop `preflight -> perception -> execution -> recovery` work end-to-end.
 
@@ -387,7 +387,7 @@ Full adaptation guide: [`docs/robot_adaptation.md`](docs/robot_adaptation.md)
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
 - [x] Dobot robot arm support
 - [x] Pick-and-place operations
@@ -402,7 +402,7 @@ Full adaptation guide: [`docs/robot_adaptation.md`](docs/robot_adaptation.md)
 
 ---
 
-## Typical Scenarios
+## 📌 Typical Scenarios
 
 ### 1) Long-horizon tabletop organization
 
