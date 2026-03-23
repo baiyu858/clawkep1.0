@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Tuple
 
 import cv2
 import numpy as np
-import open3d as o3d
 
 import transform_utils as T
 from dobot_ik_solver import DobotNova2IKSolver
@@ -35,6 +34,13 @@ DEFAULT_MAX_MOVEL_STEP_M = 0.06
 DEFAULT_MAX_MOVEL_ROT_STEP_DEG = 15.0
 DEFAULT_MIN_MOVEL_STEP_M = 0.005
 DEFAULT_MIN_MOVEL_ROT_STEP_DEG = 3.0
+_SAM_MASK_GENERATOR_CACHE: Dict[Tuple[str, str, str, int, float, float, int, int], Any] = {}
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_SAM_CANDIDATES = (
+    ("vit_h", _REPO_ROOT / ".downloads/models/sam/sam_vit_h_4b8939.pth"),
+    ("vit_l", _REPO_ROOT / ".downloads/models/sam/sam_vit_l_0b3195.pth"),
+    ("vit_b", _REPO_ROOT / ".downloads/models/sam/sam_vit_b_01ec64.pth"),
+)
 DEFAULT_TOOL_COLLISION_LOCAL_POINTS_M = np.array(
     [
         [0.000, 0.000, -0.030],
@@ -77,6 +83,131 @@ def _normalized_axis(vector: Any, fallback: np.ndarray) -> np.ndarray:
         arr = np.asarray(fallback, dtype=np.float64).reshape(-1)[:3]
         norm = np.linalg.norm(arr)
     return arr / max(norm, 1e-9)
+
+
+def _read_bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
+def _read_int_env(name: str, default: int, lower: int, upper: int) -> int:
+    raw = os.environ.get(name)
+    try:
+        value = int(raw) if raw is not None else int(default)
+    except Exception:
+        value = int(default)
+    return max(int(lower), min(int(upper), int(value)))
+
+
+def _read_float_env(name: str, default: float, lower: float, upper: float) -> float:
+    raw = os.environ.get(name)
+    try:
+        value = float(raw) if raw is not None else float(default)
+    except Exception:
+        value = float(default)
+    return max(float(lower), min(float(upper), float(value)))
+
+
+def _resolve_default_sam_asset() -> Tuple[str, Path | None]:
+    for model_type, checkpoint_path in _DEFAULT_SAM_CANDIDATES:
+        if checkpoint_path.exists():
+            return model_type, checkpoint_path
+    return "", None
+
+
+def _infer_sam_model_type(checkpoint_path: str | Path, fallback: str = "vit_b") -> str:
+    name = Path(checkpoint_path).name.lower()
+    if "vit_h" in name:
+        return "vit_h"
+    if "vit_l" in name:
+        return "vit_l"
+    if "vit_b" in name:
+        return "vit_b"
+    return str(fallback or "vit_b")
+
+
+def _get_solver_sam_mask_generator():
+    use_sam = _read_bool_env("REKEP_SOLVER_USE_SAM", True)
+    if not use_sam:
+        raise RuntimeError("solver candidate proposal now requires SAM; do not disable REKEP_SOLVER_USE_SAM")
+
+    default_model_type, default_checkpoint_path = _resolve_default_sam_asset()
+    checkpoint = str(os.environ.get("REKEP_SOLVER_SAM_CHECKPOINT", "")).strip()
+    if not checkpoint:
+        checkpoint = str(os.environ.get("REKEP_KEYPOINT_FINE_SAM_CHECKPOINT", "")).strip()
+    checkpoint_path = Path(checkpoint) if checkpoint else default_checkpoint_path
+    if checkpoint_path is None or not checkpoint_path.exists():
+        raise RuntimeError(
+            "SAM checkpoint not found for solver candidate proposal. "
+            "Set REKEP_SOLVER_SAM_CHECKPOINT or place a checkpoint under .downloads/models/sam/."
+        )
+
+    model_type = str(os.environ.get("REKEP_SOLVER_SAM_MODEL_TYPE", "")).strip()
+    if not model_type:
+        model_type = str(os.environ.get("REKEP_KEYPOINT_FINE_SAM_MODEL_TYPE", "")).strip()
+    if not model_type:
+        model_type = default_model_type or _infer_sam_model_type(checkpoint_path, "vit_b")
+
+    device = str(os.environ.get("REKEP_SOLVER_SAM_DEVICE", "")).strip()
+    if not device:
+        device = str(os.environ.get("REKEP_KEYPOINT_FINE_SAM_DEVICE", "")).strip()
+    if not device:
+        try:
+            import torch
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            device = "cpu"
+
+    points_per_side = _read_int_env("REKEP_SOLVER_SAM_POINTS_PER_SIDE", 24, 4, 128)
+    pred_iou_thresh = _read_float_env("REKEP_SOLVER_SAM_PRED_IOU_THRESH", 0.86, 0.0, 1.0)
+    stability_score_thresh = _read_float_env("REKEP_SOLVER_SAM_STABILITY_THRESH", 0.92, 0.0, 1.0)
+    crop_n_layers = _read_int_env("REKEP_SOLVER_SAM_CROP_N_LAYERS", 1, 0, 3)
+    min_mask_region_area = _read_int_env("REKEP_SOLVER_SAM_MIN_REGION_AREA", 200, 0, 20000)
+
+    cache_key = (
+        str(checkpoint_path.resolve()),
+        str(model_type),
+        str(device),
+        int(points_per_side),
+        float(pred_iou_thresh),
+        float(stability_score_thresh),
+        int(crop_n_layers),
+        int(min_mask_region_area),
+    )
+    if cache_key in _SAM_MASK_GENERATOR_CACHE:
+        return _SAM_MASK_GENERATOR_CACHE[cache_key]
+
+    try:
+        from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+    except Exception as exc:
+        raise RuntimeError(
+            "segment_anything is not installed in the rekep environment; install it before using solver mode"
+        ) from exc
+
+    try:
+        sam_model = sam_model_registry[model_type](checkpoint=str(checkpoint_path))
+        sam_model.to(device=device)
+    except Exception as exc:
+        raise RuntimeError(f"failed to initialize SAM model for solver mode: {exc}") from exc
+
+    generator = SamAutomaticMaskGenerator(
+        model=sam_model,
+        points_per_side=int(points_per_side),
+        pred_iou_thresh=float(pred_iou_thresh),
+        stability_score_thresh=float(stability_score_thresh),
+        crop_n_layers=int(crop_n_layers),
+        min_mask_region_area=int(min_mask_region_area),
+    )
+    _SAM_MASK_GENERATOR_CACHE[cache_key] = generator
+    return generator
 
 
 class DummyIKSolver:
@@ -324,6 +455,9 @@ def build_real_solver_config(*, arm: str = "right", grasp_depth_m: float = DEFAU
     config["path_solver"]["opt_rot_step_size"] = 0.60
     config["path_solver"]["opt_interpolate_pos_step_size"] = 0.03
     config["path_solver"]["opt_interpolate_rot_step_size"] = 0.18
+    # Match the original ReKep real-world proposal stage more closely:
+    # DINOv2 + SAM + k-means-per-mask, then de-duplicate candidates within 8 cm.
+    config["keypoint_proposer"]["min_dist_bt_keypoints"] = 0.08
     config["keypoint_proposer"]["max_mask_ratio"] = 0.45
     return config
 
@@ -352,16 +486,14 @@ def _depth_to_base_points(depth_image: np.ndarray, camera_calibration: Dict[str,
 
 
 
-def _build_cluster_mask(
+def _build_sam_cluster_mask(
+    rgb_bgr: np.ndarray,
     points_base: np.ndarray,
     depth_image: np.ndarray,
     *,
     bounds_min: np.ndarray,
     bounds_max: np.ndarray,
-    plane_distance_m: float = 0.008,
-    object_height_thresh_m: float = 0.010,
-    dbscan_eps_m: float = 0.030,
-    dbscan_min_points: int = 120,
+    min_mask_area_px: int = 200,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     depth = np.asarray(depth_image, dtype=np.float32)
     if depth.ndim == 3:
@@ -378,63 +510,55 @@ def _build_cluster_mask(
     in_workspace = np.all(points_base >= bounds_pad_min[None, None, :], axis=-1) & np.all(points_base <= bounds_pad_max[None, None, :], axis=-1)
     candidate_mask = valid_mask & in_workspace
     candidate_points = points_base[candidate_mask]
-    if candidate_points.shape[0] < 300:
-        raise RuntimeError(f"insufficient workspace points for candidate proposal: {candidate_points.shape[0]}")
+    candidate_point_count = int(candidate_points.shape[0])
+    if candidate_point_count < 300:
+        raise RuntimeError(f"insufficient workspace points for candidate proposal: {candidate_point_count}")
 
-    plane_normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    plane_offset = -float(np.median(candidate_points[:, 2]))
-    plane_inlier_count = 0
+    generator = _get_solver_sam_mask_generator()
+    rgb_rgb = cv2.cvtColor(np.asarray(rgb_bgr, dtype=np.uint8), cv2.COLOR_BGR2RGB)
     try:
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(candidate_points.astype(np.float64))
-        plane_model, inliers = pcd.segment_plane(distance_threshold=plane_distance_m, ransac_n=3, num_iterations=150)
-        plane_model = np.asarray(plane_model, dtype=np.float64)
-        plane_inlier_count = int(len(inliers))
-        if plane_model.shape[0] == 4 and abs(plane_model[2]) >= 0.75 and plane_inlier_count >= max(200, int(0.2 * candidate_points.shape[0])):
-            plane_normal = plane_model[:3]
-            plane_offset = float(plane_model[3])
-            if plane_normal[2] < 0:
-                plane_normal = -plane_normal
-                plane_offset = -plane_offset
-    except Exception:
-        pass
+        raw_masks = generator.generate(rgb_rgb)
+    except Exception as exc:
+        raise RuntimeError(f"SAM automatic mask generation failed: {exc}") from exc
 
-    signed_dist = np.tensordot(points_base, plane_normal, axes=([-1], [0])) + plane_offset
-    object_mask = candidate_mask & (signed_dist > object_height_thresh_m)
-    if int(np.count_nonzero(object_mask)) < 200:
-        object_mask = candidate_mask
+    labels = np.zeros(depth.shape[:2], dtype=np.int32)
+    kept_masks = []
+    sorted_masks = sorted(raw_masks, key=lambda item: int(item.get("area", 0) or 0), reverse=True)
+    for item in sorted_masks:
+        seg = item.get("segmentation")
+        if seg is None:
+            continue
+        seg = np.asarray(seg, dtype=bool)
+        if seg.shape[:2] != depth.shape[:2]:
+            continue
+        mask = seg & candidate_mask
+        area = int(np.count_nonzero(mask))
+        if area < int(min_mask_area_px):
+            continue
+        kept_masks.append(
+            {
+                "mask": mask,
+                "area": area,
+                "predicted_iou": float(item.get("predicted_iou", 0.0) or 0.0),
+                "stability_score": float(item.get("stability_score", 0.0) or 0.0),
+            }
+        )
 
-    object_points = points_base[object_mask]
-    labels = np.full(depth.shape[:2], -1, dtype=np.int32)
-    num_clusters = 0
-    if object_points.shape[0] >= max(80, dbscan_min_points):
-        try:
-            object_pcd = o3d.geometry.PointCloud()
-            object_pcd.points = o3d.utility.Vector3dVector(object_points.astype(np.float64))
-            cluster_labels = np.asarray(object_pcd.cluster_dbscan(eps=dbscan_eps_m, min_points=dbscan_min_points, print_progress=False), dtype=np.int32)
-            positive = sorted(int(v) for v in np.unique(cluster_labels) if int(v) >= 0)
-            if positive:
-                remap = {label: idx + 1 for idx, label in enumerate(positive)}
-                coords = np.argwhere(object_mask)
-                for (v, u), label in zip(coords, cluster_labels):
-                    if int(label) >= 0:
-                        labels[int(v), int(u)] = remap[int(label)]
-                num_clusters = len(remap)
-        except Exception:
-            num_clusters = 0
+    if not kept_masks:
+        raise RuntimeError("SAM returned no usable masks inside the calibrated workspace")
 
-    if num_clusters == 0:
-        labels[object_mask] = 1
-        num_clusters = 1
+    for idx, item in enumerate(kept_masks, start=1):
+        labels[item["mask"]] = int(idx)
 
     debug = {
         "valid_point_count": int(np.count_nonzero(valid_mask)),
         "workspace_point_count": int(np.count_nonzero(candidate_mask)),
-        "object_point_count": int(np.count_nonzero(object_mask)),
-        "plane_normal": plane_normal.tolist(),
-        "plane_offset": float(plane_offset),
-        "plane_inlier_count": int(plane_inlier_count),
-        "cluster_count": int(num_clusters),
+        "sam_raw_mask_count": int(len(raw_masks)),
+        "sam_kept_mask_count": int(len(kept_masks)),
+        "sam_min_mask_area_px": int(min_mask_area_px),
+        "mask_areas_px": [int(item["area"]) for item in kept_masks],
+        "mask_predicted_iou": [float(item["predicted_iou"]) for item in kept_masks],
+        "mask_stability_score": [float(item["stability_score"]) for item in kept_masks],
     }
     return labels, debug
 
@@ -487,7 +611,13 @@ def propose_candidate_keypoints(
     bounds_min = np.asarray(config["keypoint_proposer"]["bounds_min"], dtype=np.float64)
     bounds_max = np.asarray(config["keypoint_proposer"]["bounds_max"], dtype=np.float64)
     points_base = _depth_to_base_points(depth_image, camera_calibration)
-    masks, mask_debug = _build_cluster_mask(points_base, depth_image, bounds_min=bounds_min, bounds_max=bounds_max)
+    masks, mask_debug = _build_sam_cluster_mask(
+        rgb_bgr,
+        points_base,
+        depth_image,
+        bounds_min=bounds_min,
+        bounds_max=bounds_max,
+    )
 
     proposer = KeypointProposer(config["keypoint_proposer"])
     rgb_rgb = cv2.cvtColor(np.asarray(rgb_bgr, dtype=np.uint8), cv2.COLOR_BGR2RGB)
@@ -520,7 +650,7 @@ def propose_candidate_keypoints(
 
     debug_path = output_dir / f"{output_prefix}.proposal_debug.json"
     debug_payload = {
-        "proposal_method": "dinov2_rgbd_candidate_clustering",
+        "proposal_method": "dinov2_sam_mask_kmeans",
         "mask_debug": mask_debug,
         "candidate_count": int(candidate_points.shape[0]),
         "keypoints_2d": keypoints_2d,
@@ -532,8 +662,8 @@ def propose_candidate_keypoints(
     debug_path.write_text(json.dumps(_jsonable(debug_payload), ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "visible": True,
-        "reason": f"proposed {candidate_points.shape[0]} DINOv2 candidate keypoints from RGB-D foreground clusters",
-        "proposal_method": "dinov2_rgbd_candidate_clustering",
+        "reason": f"proposed {candidate_points.shape[0]} DINOv2 candidate keypoints from SAM masks",
+        "proposal_method": "dinov2_sam_mask_kmeans",
         "raw_output": "",
         "vlm": {},
         "keypoints_2d": keypoints_2d,

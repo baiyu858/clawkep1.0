@@ -5036,7 +5036,7 @@ def main():
         type=str,
         default=None,
         choices=sorted(SUPPORTED_REKEP_EXECUTION_MODES),
-        help="ReKep real execution backend: solver uses DINOv2 candidates + constraint solver; vlm_stage keeps the legacy VLM stage-action planner.",
+        help="ReKep real execution backend: solver uses DINOv2 + SAM candidate keypoints + constraint solver; vlm_stage keeps the legacy VLM stage-action planner.",
     )
     parser.add_argument(
         "--rekep_grasp_depth_m",

@@ -46,11 +46,27 @@ class KeypointProposer:
         features_flat = self._get_features(transformed_rgb, shape_info)
         # for each mask, cluster in feature space to get meaningful regions, and uske their centers as keypoint candidates
         candidate_keypoints, candidate_pixels, candidate_rigid_group_ids = self._cluster_features(points, features_flat, masks)
+        if candidate_keypoints.shape[0] == 0:
+            if not return_metadata:
+                return candidate_keypoints, rgb.copy()
+            metadata = {
+                'candidate_pixels': candidate_pixels,
+                'candidate_rigid_group_ids': candidate_rigid_group_ids,
+            }
+            return candidate_keypoints, rgb.copy(), metadata
         # exclude keypoints that are outside of the workspace
         within_space = filter_points_by_bounds(candidate_keypoints, self.bounds_min, self.bounds_max, strict=True)
         candidate_keypoints = candidate_keypoints[within_space]
         candidate_pixels = candidate_pixels[within_space]
         candidate_rigid_group_ids = candidate_rigid_group_ids[within_space]
+        if candidate_keypoints.shape[0] == 0:
+            if not return_metadata:
+                return candidate_keypoints, rgb.copy()
+            metadata = {
+                'candidate_pixels': candidate_pixels,
+                'candidate_rigid_group_ids': candidate_rigid_group_ids,
+            }
+            return candidate_keypoints, rgb.copy(), metadata
         # merge close points by clustering in cartesian space
         merged_indices = self._merge_clusters(candidate_keypoints)
         candidate_keypoints = candidate_keypoints[merged_indices]
@@ -73,7 +89,7 @@ class KeypointProposer:
 
     def _preprocess(self, rgb, points, masks):
         # convert masks to binary masks
-        masks = [masks == uid for uid in np.unique(masks)]
+        masks = [masks == uid for uid in np.unique(masks) if int(uid) > 0]
         # ensure input shape is compatible with dinov2
         H, W, _ = rgb.shape
         patch_h = int(H // self.patch_size)
@@ -140,44 +156,64 @@ class KeypointProposer:
             # consider only foreground features
             obj_features_flat = features_flat[binary_mask.reshape(-1)]
             feature_pixels = np.argwhere(binary_mask)
-            feature_points = points[binary_mask]
+            if obj_features_flat.shape[0] == 0 or feature_pixels.shape[0] == 0:
+                continue
             # reduce dimensionality to be less sensitive to noise and texture
             obj_features_flat = obj_features_flat.double()
-            (u, s, v) = torch.pca_lowrank(obj_features_flat, center=False)
-            features_pca = torch.mm(obj_features_flat, v[:, :3])
-            features_pca = (features_pca - features_pca.min(0)[0]) / (features_pca.max(0)[0] - features_pca.min(0)[0])
-            X = features_pca
-            # add feature_pixels as extra dimensions
-            feature_points_torch = torch.tensor(feature_points, dtype=features_pca.dtype, device=features_pca.device)
-            feature_points_torch  = (feature_points_torch - feature_points_torch.min(0)[0]) / (feature_points_torch.max(0)[0] - feature_points_torch.min(0)[0])
-            X = torch.cat([X, feature_points_torch], dim=-1)
-            # cluster features to get meaningful regions
-            cluster_ids_x, cluster_centers = kmeans(
-                X=X,
-                num_clusters=self.config['num_candidates_per_mask'],
-                distance='euclidean',
-                device=self.device,
-            )
-            cluster_centers = cluster_centers.to(self.device)
-            for cluster_id in range(self.config['num_candidates_per_mask']):
-                cluster_center = cluster_centers[cluster_id][:3]
+            pca_dim = int(min(3, obj_features_flat.shape[1], max(1, obj_features_flat.shape[0])))
+            if obj_features_flat.shape[0] >= 2 and pca_dim >= 1:
+                (_, _, v) = torch.pca_lowrank(obj_features_flat, q=pca_dim, center=False)
+                features_pca = torch.mm(obj_features_flat, v[:, :pca_dim])
+            else:
+                features_pca = obj_features_flat[:, :pca_dim]
+            feat_min = features_pca.min(0)[0]
+            feat_range = features_pca.max(0)[0] - feat_min
+            feat_range = torch.where(feat_range > 1e-6, feat_range, torch.ones_like(feat_range))
+            X = (features_pca - feat_min) / feat_range
+            num_clusters = int(min(self.config['num_candidates_per_mask'], X.shape[0]))
+            if num_clusters <= 0:
+                continue
+            # Cluster on DINO features only. Use the image-space centroid of each
+            # cluster as the concrete 2D keypoint to match the original ReKep flow.
+            if num_clusters == 1:
+                cluster_ids_x = torch.zeros((X.shape[0],), dtype=torch.long, device=X.device)
+            else:
+                cluster_ids_x, _ = kmeans(
+                    X=X,
+                    num_clusters=num_clusters,
+                    distance='euclidean',
+                    device=self.device,
+                )
+            for cluster_id in range(num_clusters):
                 member_idx = cluster_ids_x == cluster_id
-                member_points = feature_points[member_idx]
                 member_pixels = feature_pixels[member_idx]
-                member_features = features_pca[member_idx]
-                dist = torch.norm(member_features - cluster_center, dim=-1)
-                closest_idx = torch.argmin(dist)
-                candidate_keypoints.append(member_points[closest_idx])
-                candidate_pixels.append(member_pixels[closest_idx])
+                if member_pixels.shape[0] == 0:
+                    continue
+                centroid_vu = np.mean(member_pixels.astype(np.float64), axis=0)
+                d2 = np.sum((member_pixels.astype(np.float64) - centroid_vu[None, :]) ** 2, axis=1)
+                closest_idx = int(np.argmin(d2))
+                candidate_pixel = member_pixels[closest_idx]
+                point = points[int(candidate_pixel[0]), int(candidate_pixel[1])]
+                if not np.all(np.isfinite(point)):
+                    continue
+                candidate_keypoints.append(point)
+                candidate_pixels.append(candidate_pixel)
                 candidate_rigid_group_ids.append(rigid_group_id)
 
-        candidate_keypoints = np.array(candidate_keypoints)
-        candidate_pixels = np.array(candidate_pixels)
-        candidate_rigid_group_ids = np.array(candidate_rigid_group_ids)
+        if candidate_keypoints:
+            candidate_keypoints = np.asarray(candidate_keypoints, dtype=np.float64)
+            candidate_pixels = np.asarray(candidate_pixels, dtype=np.int32)
+            candidate_rigid_group_ids = np.asarray(candidate_rigid_group_ids, dtype=np.int32)
+        else:
+            candidate_keypoints = np.zeros((0, 3), dtype=np.float64)
+            candidate_pixels = np.zeros((0, 2), dtype=np.int32)
+            candidate_rigid_group_ids = np.zeros((0,), dtype=np.int32)
 
         return candidate_keypoints, candidate_pixels, candidate_rigid_group_ids
 
     def _merge_clusters(self, candidate_keypoints):
+        if candidate_keypoints.shape[0] == 0:
+            return []
         self.mean_shift.fit(candidate_keypoints)
         cluster_centers = self.mean_shift.cluster_centers_
         merged_indices = []
